@@ -6,7 +6,10 @@
   "CmdArgs": [ "0ne00000000" ],
   "Capabilities": {
     "AllowedApplicationConnections": [ "1EE4E525-4456-4A63-A2AF-E2A2CB1518E9" ],
-    "AllowedConnections": ["global.azure-devices-provisioning.net"],
+    "AllowedConnections": [
+      "global.azure-devices-provisioning.net",
+      "iotc-dead-beef.azure-devices.net"
+    ],
     "Gpio": [
       "$AVNET_MT3620_SK_USER_BUTTON_A",
       "$AVNET_MT3620_SK_USER_BUTTON_B",
@@ -15,7 +18,7 @@
     ],
     "I2cMaster": [ "$AVNET_MT3620_SK_ISU2_I2C" ],
     "Uart": [ "$AVNET_MT3620_SK_ISU0_UART" ],
-    "DeviceAuthentication": "00000000-0000-0000-0000-000000000000",
+    "DeviceAuthentication": "00000000-1234-0000-0000-000000000000",
     "WifiConfig": true
   },
   "ApplicationType": "Default"
