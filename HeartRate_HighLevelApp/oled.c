@@ -327,7 +327,7 @@ void oled_draw_hr4(void)
 
 	case DISPLAY_RESULTS:
 		// Convert heartRate value to string
-		intToStr((int)median_hr, string_data, 1);
+		ftoa(median_hr, string_data, 1);
 
 		sd1306_draw_string(OLED_LINE_2_X, OLED_LINE_2_Y, str_heartRate, FONT_SIZE_LINE, white_pixel);
 		sd1306_draw_string(sizeof(str_heartRate) * 6, OLED_LINE_2_Y, string_data, FONT_SIZE_LINE, white_pixel);
@@ -336,7 +336,7 @@ void oled_draw_hr4(void)
 		sd1306_draw_string(sizeof(str_heartRate) * 6 + (strlen(string_data) + 1) * 6, OLED_LINE_2_Y, "BPM", FONT_SIZE_LINE, white_pixel);
 
 		// Convert sp02 value to string, add the % symbol
-		intToStr((int)median_spo2, string_data, 1);
+		ftoa(median_spo2, string_data, 1);
 		string_data[strlen(string_data) + 1] = '\0';
 		string_data[strlen(string_data)] = '%';
 

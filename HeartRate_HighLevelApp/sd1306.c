@@ -49,10 +49,13 @@ int32_t sd1306_send_command(uint8_t addr, uint8_t cmd)
 	data_to_send[1] = cmd;
 
     // Send the data by I2C bus
-	retval = I2CMaster_Write(i2cFd, addr, data_to_send, 2);
+	// Catch the case where the interface reports busy, and keep trying
+	do {
+		retval = I2CMaster_Write(i2cFd, addr, data_to_send, 2);
+	} while ((retval == -1) && (errno == 16));
 
 	if (retval == -1)
-		Log_Debug("1:ERROR: I2CMaster_Writer: errno=%d (%s)\n", errno, strerror(errno));
+		Log_Debug("ERROR: I2CMaster_Writer: errno=%d (%s)\n", errno, strerror(errno));
 	return retval;
 }
 
@@ -75,11 +78,15 @@ int32_t sd1306_write_data(uint8_t addr, uint8_t *data)
 	{
 		data_to_send[i + 1] = data[i];
 	}
+
 	// Send the data by I2C bus
-	retval = I2CMaster_Write(i2cFd, addr, data_to_send, 1025);
+	// Catch the case where the interface reports busy, and keep trying
+	do {
+		retval = I2CMaster_Write(i2cFd, addr, data_to_send, 1025);
+	} while ((retval == -1) && (errno == 16));
 
 	if (retval == -1)
-		Log_Debug("2: ERROR: I2CMaster_Writer: errno=%d (%s)\n", errno, strerror(errno));
+		Log_Debug("ERROR: I2CMaster_Writer: errno=%d (%s)\n", errno, strerror(errno));
 	return retval;
 }
 

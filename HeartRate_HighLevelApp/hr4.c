@@ -111,7 +111,13 @@ int intDetect(void)
 /// </summary>
 int read_i2c( uint8_t addr, uint16_t count, uint8_t* ptr ) 
 {
-    int r = I2CMaster_WriteThenRead(i2cFd, MAX30101_SAD, &addr, sizeof(addr), ptr, count);
+    int r;
+    
+    // Catch the case where the interface reports busy, and keep trying
+    do {
+        r = I2CMaster_WriteThenRead(i2cFd, MAX30101_SAD, &addr, sizeof(addr), ptr, count);
+    } while ((r == -1) && (errno == 16));
+
     if (r == -1)
         printf("ERROR: I2CMaster_WriterThenReadSync: errno=%d \n", errno);
     return r;
@@ -126,7 +132,12 @@ void write_i2c( uint8_t addr, uint16_t count, uint8_t* ptr)
     buff[0] = addr;
     buff[1] = *ptr;
 
-    int r = I2CMaster_Write(i2cFd, MAX30101_SAD, buff, 2);
+    int r;
+    // Catch the case where the interface reports busy, and keep trying
+    do {
+        r = I2CMaster_Write(i2cFd, MAX30101_SAD, buff, 2);
+    } while ((r == -1) && (errno == 16));
+
     if( r == -1)
         printf("ERROR: I2CMaster_Writer: errno=%d \n", errno);
 }
@@ -179,10 +190,25 @@ void hr4_sys_init(int fd)
 /// </summary>
 void HR4TimerEventHandler(EventLoopTimer* timer)
 {
+// Define the max number of HR samples to take 
 #define NUM_SAMPLES 30
+
+// Define how many seconds to display the results on the OLED
 #define SHOW_RESULTS_COUNT 30
+
+// Define  how many data points to use when determining a stable result
 #define VALIDATION_DATA_POINTS 5
-#define DELTA_SUM_TARGET 3
+
+// Define the target difference before declaring a stable result
+#define DELTA_SUM_TARGET 4
+
+// Define how many of the first data points to throw away when calibrating
+// We saw bad data at the beginning of data collection and this helped get
+// consistant results
+#define THROW_AWAY_COUNT 5
+
+// Define how many times to loop looking for a finger detect event before exiting
+#define DETECT_LOOP_COUNT 50
 
     static uint8_t showResultsCount;
 
@@ -212,15 +238,25 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
         n_ir_buffer_length = IR_BUFFER_LEN; //buffer length of 500 stores 25 seconds of samples running at 100sps
 
         //read the first 500 samples, and determine the signal range
-        for (i = 0; i < n_ir_buffer_length; i++) {
+        for (i = 0; i < (n_ir_buffer_length + THROW_AWAY_COUNT); i++) {
 
-            while (!max30102_data_available())
-             { }; // do nothing
-          maxim_max30102_read_fifo((aun_red_buffer + i), (aun_ir_buffer + i));  //read from MAX30102 FIFO
+            while (!max30102_data_available()) {
+                ; // do nothing until data is available
+            }
+
+            uint32_t temp1, temp2;
+
+            // If it's the first 5 samples throw them into the bit bucket on the floor!
+            if (i < THROW_AWAY_COUNT) {
+                maxim_max30102_read_fifo((&temp1), (&temp2));  //read from MAX30102 FIFO
+            }
+            else {
+                maxim_max30102_read_fifo((aun_red_buffer + (i - THROW_AWAY_COUNT)), (aun_ir_buffer + (i - THROW_AWAY_COUNT)));  //read from MAX30102 FIFO
+            }
 
         }
 
-        //calculate heart rate and SpO2 after first 500 samples (first 5 seconds of samples)
+        //calculate heart rate and SpO2 after first 500 samples 
         maxim_heart_rate_and_oxygen_saturation(aun_ir_buffer, n_ir_buffer_length, aun_red_buffer, &n_sp02, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid);
 
         // Check to see if the data is valid.  If not, then reset the device and re-start the test
@@ -305,8 +341,10 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
             if (nbr_readings > VALIDATION_DATA_POINTS) {
 
                 int deltaSum = 0;
-                int intermediateSum = 0;
-                float intermediateAverage = 0.0;
+                int intermediateHRSum = 0;
+                float intermediateHRAverage = 0.0;
+                int intermediateSp02Sum = 0;
+                float intermediateSp02Average = 0.0;
 
                 // Look at the last 5 HR samples.  If the the sum of the deltas between adjacent readings
                 // is DELTA_SUM_TARGET or less, then call it stable and report the results
@@ -316,7 +354,8 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
                     deltaSum += abs(hr[(nbr_readings-count-1)] - hr[(nbr_readings-count-2)]);
                     
                     // Keep a running sum to calculate the average if the data is good
-                    intermediateSum += hr[(nbr_readings-1)-count];
+                    intermediateHRSum += hr[(nbr_readings-1)-count];
+                    intermediateSp02Sum += spo2[(nbr_readings-1)-count];
                 }
 
                 // If the difference between the last VALIDATION_DATA_POINTS(5) readings is less than or equal to DELTA_SUM_TARGET (3),
@@ -324,12 +363,12 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
                 if (deltaSum <= DELTA_SUM_TARGET) {
                     
                     // Calculate the average of the last VALIDATION_DATA_POINTS data points
-                    intermediateAverage = (float)intermediateSum / (float)VALIDATION_DATA_POINTS;
-
+                    intermediateHRAverage = (float)intermediateHRSum / (float)VALIDATION_DATA_POINTS;
+                    intermediateSp02Average = (float)intermediateSp02Sum / (float)VALIDATION_DATA_POINTS;
                     // We found a stable reading!  Set the results variables and transition
                     // to the next state
-                    median_hr = intermediateAverage;
-                    median_spo2 = n_sp02;
+                    median_hr = intermediateHRAverage;
+                    median_spo2 = intermediateSp02Average;
                     currentState = SEND_RESULTS;
 
                     Log_Debug("\n\n\nFound stable reading: %0.0f\n\n\n", median_hr);
@@ -400,8 +439,8 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
 
         }
         else {
-            Log_Debug("\nStable Blood Oxygen Level = %.0f%%\n", median_spo2);
-            Log_Debug("         Stable Heart Rate = %.0f BPM\n", median_hr);
+            Log_Debug("\nStable Blood Oxygen Level = %.1f%%\n", median_spo2);
+            Log_Debug("         Stable Heart Rate = %.1f BPM\n", median_hr);
         }
 
         // Construct a JSON telemetry message.  Report the median values as telemetry.
@@ -423,7 +462,7 @@ void HR4TimerEventHandler(EventLoopTimer* timer)
         // Keep track of each time we check for a finger detect.  If we just loop
         // until we see a finger we'll starve the thread and the Azure connection 
         // will disconnect
-        int loopCnt = 10;
+        int loopCnt = DETECT_LOOP_COUNT;
         while (!max30102_finger_detected()) {
             if (--loopCnt == 0) {
                 return;
